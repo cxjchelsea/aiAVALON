@@ -87,32 +87,7 @@ class LLMStrategyEngine:
             if can_init:
                 if base_url:
                     # 需要指定base_url（DeepSeek、Qwen或自定义）
-                    # 为不同提供商设置不同的HTTP客户端配置
-                    try:
-                        import httpx
-                        if self.api_provider == "qwen":
-                            # 本地Qwen：更长的超时时间，允许更长的连接时间
-                            http_client = httpx.Client(
-                                timeout=httpx.Timeout(120.0, connect=30.0, read=120.0),
-                                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
-                            )
-                            self.client = OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
-                            print(f"Qwen客户端初始化: base_url={base_url}, 超时=120秒")
-                        elif self.api_provider == "deepseek":
-                            # DeepSeek：中等超时时间
-                            http_client = httpx.Client(
-                                timeout=httpx.Timeout(90.0, connect=20.0, read=90.0),
-                                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
-                            )
-                            self.client = OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
-                            print(f"DeepSeek客户端初始化: base_url={base_url}, 超时=90秒")
-                        else:
-                            # 其他提供商：默认配置
-                            self.client = OpenAI(api_key=api_key, base_url=base_url)
-                    except ImportError:
-                        # 如果httpx不可用，使用默认配置
-                        print(f"警告: httpx未安装，使用默认HTTP配置")
-                        self.client = OpenAI(api_key=api_key, base_url=base_url)
+                    self.client = OpenAI(api_key=api_key, base_url=base_url)
                 else:
                     # OpenAI使用默认配置
                     self.client = OpenAI(api_key=api_key)
@@ -173,6 +148,7 @@ class LLMStrategyEngine:
         
         facts = {
             "current_round": context.current_round,
+            "is_first_round": context.current_round == 1,  # 明确标注是否为第一轮
             "current_phase": context.game_phase.value,
             "successful_missions": context.successful_missions,
             "failed_missions": context.failed_missions,
@@ -191,7 +167,9 @@ class LLMStrategyEngine:
             ]
         }
         
-        if mission_history:
+        # 明确标注是否有历史信息
+        if mission_history and len(mission_history) > 0:
+            facts["has_mission_history"] = True
             facts["mission_history"] = [
                 {
                     "round": m["round"],
@@ -203,20 +181,15 @@ class LLMStrategyEngine:
                 }
                 for m in mission_history
             ]
+        else:
+            facts["has_mission_history"] = False
+            if context.current_round == 1:
+                facts["mission_history"] = []  # 第一轮明确为空列表
+                facts["note"] = "这是第1轮任务，游戏刚刚开始，没有任何任务历史。不要提及'前几轮'、'之前'等不存在的信息。"
+            else:
+                facts["mission_history"] = []
         
         return facts
-    
-    def _get_timeout_for_provider(self) -> int:
-        """根据API提供商返回合适的超时时间"""
-        if self.api_provider == "qwen":
-            # 本地Qwen可能需要更长时间
-            return 120  # 2分钟
-        elif self.api_provider == "deepseek":
-            # DeepSeek可能需要更长时间
-            return 90  # 1.5分钟
-        else:
-            # OpenAI等
-            return 60  # 1分钟
     
     def _call_llm(self, prompt: str, system_prompt: str = None, max_retries: int = 3) -> str:
         """调用LLM，带重试机制和更好的错误处理"""
@@ -228,73 +201,34 @@ class LLMStrategyEngine:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
-        # 根据提供商设置超时时间
-        timeout = self._get_timeout_for_provider()
-        
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                # 计算总token数（粗略估算）
-                total_chars = len(system_prompt or "") + len(prompt)
-                estimated_tokens = total_chars // 3  # 粗略估算：3个字符约等于1个token
-                
-                # 根据内容长度调整max_tokens
-                max_tokens = min(2000, max(500, estimated_tokens + 200))  # 至少500，最多2000
-                
-                print(f"[{self.my_name}] 调用LLM ({self.api_provider}, 模型: {self.model}, 超时: {timeout}秒, 尝试 {attempt + 1}/{max_retries + 1})...")
-                
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=max_tokens,
-                    timeout=timeout
+                    max_tokens=500,
+                    timeout=60  # 增加到60秒超时
                 )
-                
-                result = response.choices[0].message.content.strip()
-                print(f"[{self.my_name}] LLM调用成功")
-                return result
-                
+                return response.choices[0].message.content.strip()
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
-                error_type = type(e).__name__
                 
                 # 判断错误类型
                 is_connection_error = any(keyword in error_str for keyword in [
-                    "connection", "connect", "network", "10054", "远程主机", 
-                    "connection error", "connecterror", "refused"
+                    "connection", "connect", "network", "timeout", "timed out", 
+                    "10054", "远程主机", "connection error"
                 ])
-                is_timeout_error = any(keyword in error_str for keyword in [
-                    "timeout", "timed out", "read timeout", "timeout error"
-                ])
-                is_api_error = any(keyword in error_str for keyword in [
-                    "api", "401", "403", "429", "500", "502", "503", "504"
-                ])
-                
-                print(f"[{self.my_name}] LLM调用失败 (尝试 {attempt + 1}/{max_retries + 1}): {error_type}")
-                print(f"  错误详情: {str(e)[:300]}")
                 
                 if attempt < max_retries:
-                    # 根据错误类型决定等待时间
+                    # 重试前等待，连接错误等待更长时间
                     import time
+                    wait_time = 2.0 if is_connection_error else 0.5 * (attempt + 1)
+                    print(f"LLM调用失败 (尝试 {attempt + 1}/{max_retries + 1})，{wait_time}秒后重试...")
                     if is_connection_error:
-                        wait_time = 3.0 * (attempt + 1)  # 连接错误：3秒、6秒、9秒
-                        print(f"  错误类型: 连接错误，{wait_time}秒后重试...")
-                    elif is_timeout_error:
-                        wait_time = 2.0 * (attempt + 1)  # 超时错误：2秒、4秒、6秒
-                        print(f"  错误类型: 超时错误，{wait_time}秒后重试...")
-                        # 超时错误时，可以尝试增加超时时间
-                        if attempt == 1:  # 第二次重试时
-                            timeout = min(timeout * 1.5, 180)  # 增加50%超时，最多3分钟
-                            print(f"  增加超时时间到 {timeout}秒")
-                    elif is_api_error:
-                        wait_time = 5.0 * (attempt + 1)  # API错误：5秒、10秒、15秒
-                        print(f"  错误类型: API错误，{wait_time}秒后重试...")
-                    else:
-                        wait_time = 1.0 * (attempt + 1)  # 其他错误：1秒、2秒、3秒
-                        print(f"  错误类型: 其他错误，{wait_time}秒后重试...")
-                    
+                        print(f"  错误类型: 连接错误 - {type(e).__name__}")
                     time.sleep(wait_time)
                     continue
                 else:
@@ -302,16 +236,10 @@ class LLMStrategyEngine:
                     error_msg = f"LLM调用失败 (已重试 {max_retries + 1} 次)"
                     if is_connection_error:
                         error_msg += f": 连接错误 - 请检查网络连接和API服务状态"
-                        if self.api_provider == "qwen":
-                            error_msg += f"\n  提示: 如果是本地Qwen，请检查服务是否运行在 {self.client.base_url}"
-                    elif is_timeout_error:
-                        error_msg += f": 请求超时 ({timeout}秒) - 可能是网络慢或服务响应慢"
-                        if self.api_provider == "deepseek":
-                            error_msg += f"\n  提示: DeepSeek可能需要更长时间，可以尝试增加超时时间"
-                    elif is_api_error:
-                        error_msg += f": API错误 - 请检查API密钥和服务状态"
+                    elif "timeout" in error_str or "timed out" in error_str:
+                        error_msg += f": 请求超时 - 请检查网络连接或增加超时时间"
                     else:
-                        error_msg += f": {error_type} - {str(e)[:200]}"
+                        error_msg += f": {type(e).__name__} - {str(e)[:200]}"
                     print(error_msg)
                     raise RuntimeError(error_msg) from e
     
@@ -356,10 +284,9 @@ class LLMStrategyEngine:
                         mission_history_desc += f" ⚠️ 关键信息：队伍中有{mission['fail_count']}个坏人投了失败票"
                 mission_history_desc += "\n"
         else:
-            # 明确说明没有任务历史（特别是第1轮）
+            # 第一轮或没有历史时，明确说明
             if context.current_round == 1:
-                mission_history_desc = "\n⚠️ 重要：这是第1轮任务，**还没有任何任务历史**！\n"
-                mission_history_desc += "你不能说\"前几轮\"、\"之前的表现\"、\"之前的任务\"等，因为这是第一轮。\n"
+                mission_history_desc = "\n⚠️ **重要：这是第1轮任务，还没有任何任务历史。不要提及'前几轮'、'之前的表现'等不存在的历史信息！**\n"
             else:
                 mission_history_desc = "\n任务历史：暂无\n"
         
@@ -457,7 +384,13 @@ class LLMStrategyEngine:
 请按照思维链（Chain-of-Thought）进行推理，展示你的思考过程。"""
         
         # 7. 构建User Prompt（包含CoT要求）
+        # 第一轮特殊提示
+        first_round_warning = ""
+        if context.current_round == 1:
+            first_round_warning = "\n⚠️ **关键提醒：这是第1轮任务，游戏刚刚开始，还没有任何任务历史。在分析时不要假设存在历史信息！**\n"
+        
         user_prompt = f"""{game_context}
+{first_round_warning}
 {visible_info_desc}
 
 所有玩家（你可以选择任意{context.mission_config.get('team_size', 2)}人，包括你自己）：
@@ -467,9 +400,9 @@ class LLMStrategyEngine:
 注意：作为队长，你可以选择自己加入队伍。
 
 **请按照以下步骤思考（Chain-of-Thought）**：
-1. 分析当前游戏状态
-2. 分析任务历史（关键推理依据）
-3. 评估每个玩家
+1. 分析当前游戏状态（特别注意：这是第{context.current_round}轮，是否有历史信息？）
+2. 分析任务历史（关键推理依据）（第1轮没有历史，只能基于可见信息和信念系统）
+3. 评估每个玩家（基于可见信息、信念系统，不要编造历史）
 4. 考虑角色目标
 5. 做出最终决策
 
@@ -590,14 +523,20 @@ class LLMStrategyEngine:
                 system_prompt += "\n重要：你是队长，你提议了这个队伍，所以你必须投票同意。"
         
         # 7. 构建User Prompt（包含CoT要求）
+        # 第一轮特殊提示
+        first_round_warning = ""
+        if context.current_round == 1:
+            first_round_warning = "\n⚠️ **关键提醒：这是第1轮任务，游戏刚刚开始，还没有任何任务历史。在分析时不要假设存在历史信息！**\n"
+        
         user_prompt = f"""{game_context}
+{first_round_warning}
 
 当前提议的队伍是：{', '.join(team_names)}
 
 **请按照以下步骤思考（Chain-of-Thought）**：
-1. 检查流局风险（关键！）
-2. 分析提议的队伍
-3. 分析任务历史
+1. 检查流局风险（关键！）（第1轮通常是第一次投票，没有流局风险）
+2. 分析提议的队伍（基于可见信息和信念系统）
+3. 分析任务历史（第1轮没有历史，只能基于其他信息判断）
 4. 考虑角色目标
 5. 做出最终决策
 
@@ -906,12 +845,17 @@ class LLMStrategyEngine:
                 recent_speech_text += f"- {speaker_name}: {content}\n"
         
         # 6. 构建System Prompt
+        # 第一轮特殊提示
+        first_round_note = ""
+        if context.current_round == 1:
+            first_round_note = "\n⚠️ **特别重要：这是第1轮任务，游戏刚刚开始。你的发言中绝对不要提及'前几轮'、'之前'、'历史'等不存在的信息！只能基于当前轮次的信息发言。**\n"
+        
         if template:
             system_prompt = f"""{template}
 
 你的名字是{self.my_name}。
 你的人格特质是{self.personality.value}。
-
+{first_round_note}
 **重要：事实核查**
 你的发言必须基于以下提供的游戏事实（JSON格式），不得编造信息：
 {facts_json}
@@ -925,7 +869,7 @@ class LLMStrategyEngine:
 你的人格特质是{self.personality.value}。
 
 请生成一段自然的发言。
-
+{first_round_note}
 **重要：事实核查**
 你的发言必须基于以下提供的游戏事实（JSON格式），不得编造信息：
 {facts_json}
@@ -936,22 +880,21 @@ class LLMStrategyEngine:
 请按照思维链（Chain-of-Thought）思考发言目的和内容。"""
         
         # 7. 构建User Prompt（包含CoT要求）
-        # 特别强调第1轮的情况
-        round_warning = ""
+        # 第一轮特殊提示
+        first_round_warning = ""
         if context.current_round == 1:
-            round_warning = "\n⚠️ **特别提醒：这是第1轮任务，还没有任何任务历史！**\n"
-            round_warning += "你不能在发言中提到\"前几轮\"、\"之前的表现\"、\"之前的任务\"等，因为这是第一轮。\n"
-            round_warning += "只能说\"第一轮\"、\"刚开始\"、\"还没有历史\"等。\n"
+            first_round_warning = "\n⚠️ **关键提醒：这是第1轮任务，游戏刚刚开始，还没有任何任务历史、投票历史或之前的发言记录。你的发言中不要提及'前几轮'、'之前的表现'、'历史记录'等不存在的信息！**\n"
         
         user_prompt = f"""{game_context}
+{first_round_warning}
 {recent_speech_text}
-{round_warning}
+
 **请按照以下步骤思考（Chain-of-Thought）**：
-1. 分析当前局势（特别注意：这是第{context.current_round}轮，是否有任务历史？）
+1. 分析当前局势（特别注意：这是第{context.current_round}轮，是否有历史信息？）
 2. 确定发言目的
-3. 分析最近发言
+3. 分析最近发言（如果有的话）
 4. 考虑角色身份
-5. 生成发言（确保发言内容符合当前轮次，不要编造不存在的历史）
+5. 生成发言（确保发言内容符合当前轮次，不要编造历史）
 
 请生成你的发言（只返回发言内容，不要其他说明）："""
         

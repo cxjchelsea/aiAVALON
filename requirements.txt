@@ -2,6 +2,8 @@ numpy>=1.24.0
 openai>=1.0.0
 python-dotenv>=1.0.0
 typing-extensions>=4.8.0
+flask>=2.3.0
+flask-cors>=4.0.0
 
 # 可选：LangGraph 集成（用于优化游戏流程管理）
 # 取消注释以启用LangGraph

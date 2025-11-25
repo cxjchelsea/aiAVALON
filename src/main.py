@@ -39,6 +39,9 @@ class AvalonGame:
         # 初始化智能体
         self.agents: List[BaseAgent] = []
         self._initialize_agents()
+        
+        # 游戏历史记录（用于前端展示）
+        self.game_history: List[Dict] = []
     
     def _initialize_agents(self):
         """初始化智能体"""
@@ -171,10 +174,23 @@ class AvalonGame:
             game_state["mission_config"] = base_game_state["mission_config"]
             game_state["mission_history"] = base_game_state.get("mission_history", [])
             
+            # 生成发言（无论verbose与否都生成，用于前端展示）
+            speech = agent.generate_speech(game_state, recent_speeches)
+            recent_speeches.append({"player_id": agent.player_id, "name": agent.name, "speech": speech})
+            
+            # 记录到游戏历史
+            self.game_history.append({
+                "type": "speech",
+                "round": self.engine.state.current_round,
+                "phase": "discussion",
+                "player_id": agent.player_id,
+                "player_name": agent.name,
+                "content": speech,
+                "timestamp": len(self.game_history)
+            })
+            
             if verbose:
-                speech = agent.generate_speech(game_state, recent_speeches)
                 print(f"{agent.name}: {speech}")
-                recent_speeches.append({"player_id": agent.player_id, "name": agent.name, "speech": speech})
         
         # 第二阶段：讨论结束后，队长根据讨论内容决定队伍
         leader_game_state = self.engine.get_game_state_summary(leader_id)
@@ -184,9 +200,23 @@ class AvalonGame:
         # 队长根据讨论内容决定队伍
         proposed_team = leader_agent.propose_team(leader_game_state)
         
+        leader_name = self.engine.state.players[leader_id].name
+        team_names = [self.engine.state.players[pid].name for pid in proposed_team]
+        
+        # 记录到游戏历史
+        self.game_history.append({
+            "type": "team_proposal",
+            "round": self.engine.state.current_round,
+            "phase": "discussion",
+            "player_id": leader_id,
+            "player_name": leader_name,
+            "content": f"提议队伍: {', '.join(team_names)}",
+            "team_members": proposed_team,
+            "team_member_names": team_names,
+            "timestamp": len(self.game_history)
+        })
+        
         if verbose:
-            leader_name = self.engine.state.players[leader_id].name
-            team_names = [self.engine.state.players[pid].name for pid in proposed_team]
             print(f"\n{leader_name} 根据讨论决定队伍: {', '.join(team_names)}")
         
         # 提交提议
@@ -231,8 +261,20 @@ class AvalonGame:
             
             votes[agent.player_id] = vote
             
+            # 记录到游戏历史
+            vote_text = "同意" if vote else "拒绝"
+            self.game_history.append({
+                "type": "vote",
+                "round": self.engine.state.current_round,
+                "phase": "voting",
+                "player_id": agent.player_id,
+                "player_name": agent.name,
+                "content": f"投票: {vote_text}",
+                "vote": vote,
+                "timestamp": len(self.game_history)
+            })
+            
             if verbose:
-                vote_text = "同意" if vote else "拒绝"
                 print(f"{agent.name}: {vote_text}")
             
             self.engine.vote_on_team(agent.player_id, vote)
@@ -240,9 +282,22 @@ class AvalonGame:
         # 处理投票结果
         voting_complete, passed = self.engine.process_voting_result()
         
+        approve_count = sum(1 for v in votes.values() if v)
+        reject_count = len(votes) - approve_count
+        
+        # 记录投票结果到游戏历史
+        self.game_history.append({
+            "type": "vote_result",
+            "round": self.engine.state.current_round,
+            "phase": "voting",
+            "content": f"投票结果: {approve_count} 同意, {reject_count} 拒绝 - {'通过' if passed else '未通过'}",
+            "approve_count": approve_count,
+            "reject_count": reject_count,
+            "passed": passed,
+            "timestamp": len(self.game_history)
+        })
+        
         if verbose:
-            approve_count = sum(1 for v in votes.values() if v)
-            reject_count = len(votes) - approve_count
             print(f"\n投票结果: {approve_count} 同意, {reject_count} 拒绝")
             print(f"结果: {'通过' if passed else '未通过'}")
     
@@ -279,8 +334,20 @@ class AvalonGame:
                 success = agent.vote_on_mission(game_state, mission_team)
                 mission_votes[agent.player_id] = success
                 
+                # 记录到游戏历史
+                result_text = "成功" if success else "失败"
+                self.game_history.append({
+                    "type": "mission_vote",
+                    "round": self.engine.state.current_round,
+                    "phase": "mission",
+                    "player_id": agent.player_id,
+                    "player_name": agent.name,
+                    "content": f"任务投票: {result_text}",
+                    "success": success,
+                    "timestamp": len(self.game_history)
+                })
+                
                 if verbose:
-                    result_text = "成功" if success else "失败"
                     print(f"{agent.name}: {result_text}")
         
         # 提交任务结果
