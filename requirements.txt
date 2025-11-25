@@ -1,0 +1,10 @@
+numpy>=1.24.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+typing-extensions>=4.8.0
+
+# 可选：LangGraph 集成（用于优化游戏流程管理）
+# langgraph>=0.0.40
+# langchain>=0.1.0
+# langchain-openai>=0.0.5
+
