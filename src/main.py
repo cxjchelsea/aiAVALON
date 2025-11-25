@@ -371,19 +371,33 @@ def main():
     
     # 检查是否使用LLM（可以通过环境变量USE_LLM或直接设置）
     use_llm = os.getenv("USE_LLM", "false").lower() == "true"
-    llm_api_provider = os.getenv("LLM_API_PROVIDER", "openai").lower()  # "openai" 或 "deepseek"
-    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini" if llm_api_provider == "openai" else "deepseek-chat")
+    llm_api_provider = os.getenv("LLM_API_PROVIDER", "openai").lower()  # "openai", "deepseek", "qwen"
+    use_langgraph = os.getenv("USE_LANGGRAPH", "false").lower() == "true"
     
-    # 根据提供商选择API密钥
+    # 根据提供商选择API密钥和模型
     if llm_api_provider == "deepseek":
         llm_api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+        default_model = "deepseek-chat"
         provider_name = "DeepSeek"
+        env_var_name = "DEEPSEEK_API_KEY"
+    elif llm_api_provider == "qwen":
+        llm_api_key = os.getenv("QWEN_API_KEY", "not-needed")
+        default_model = os.getenv("QWEN_MODEL", "qwen")
+        provider_name = "Qwen (本地)"
+        env_var_name = "QWEN_API_KEY"
+        base_url = os.getenv("QWEN_BASE_URL", "http://localhost:8000/v1")
+        if use_llm:
+            print(f"使用本地Qwen模型: {base_url}")
     else:
         llm_api_key = os.getenv("OPENAI_API_KEY")
+        default_model = "gpt-4o-mini"
         provider_name = "OpenAI"
+        env_var_name = "OPENAI_API_KEY"
     
-    if use_llm and not llm_api_key:
-        print(f"警告: 设置了USE_LLM=true但未设置{provider_name} API密钥，将使用普通策略引擎")
+    llm_model = os.getenv("LLM_MODEL", default_model)
+    
+    if use_llm and llm_api_provider != "qwen" and not llm_api_key:
+        print(f"警告: 设置了USE_LLM=true但未设置{env_var_name}，将使用普通策略引擎")
         use_llm = False
     
     # 创建游戏（5人局）
@@ -402,8 +416,23 @@ def main():
     else:
         print("使用普通策略引擎")
     
-    # 运行游戏
-    game.run_game(verbose=True)
+    # 选择运行方式
+    if use_langgraph:
+        try:
+            from game.langgraph_game import LangGraphGameEngine
+            print("使用LangGraph游戏引擎")
+            langgraph_engine = LangGraphGameEngine(game.engine, game.agents, verbose=True)
+            langgraph_engine.run()
+        except ImportError:
+            print("警告: LangGraph未安装，使用传统游戏循环")
+            print("安装命令: pip install langgraph")
+            game.run_game(verbose=True)
+        except Exception as e:
+            print(f"LangGraph执行错误: {e}，回退到传统游戏循环")
+            game.run_game(verbose=True)
+    else:
+        # 运行游戏
+        game.run_game(verbose=True)
 
 
 if __name__ == "__main__":

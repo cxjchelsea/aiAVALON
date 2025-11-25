@@ -11,7 +11,8 @@ aiAVALON/
 │   │   ├── __init__.py
 │   │   ├── rules.py          # 游戏规则定义
 │   │   ├── roles.py          # 角色定义
-│   │   └── game_engine.py    # 中央游戏引擎
+│   │   ├── game_engine.py    # 中央游戏引擎
+│   │   └── langgraph_game.py # LangGraph游戏引擎（可选）
 │   ├── agent/
 │   │   ├── __init__.py
 │   │   ├── base_agent.py     # 智能体基类
@@ -20,6 +21,8 @@ aiAVALON/
 │   │   ├── llm_strategy.py   # LLM策略引擎
 │   │   └── communication.py # 沟通生成器
 │   └── main.py               # 主程序入口
+├── docs/
+│   └── langgraph_integration.md  # LangGraph集成文档
 ├── requirements.txt
 ├── .env.example              # 环境变量示例
 └── README.md
@@ -62,12 +65,19 @@ python -m src.main
 - 双重策略引擎：
   - **规则引擎**：基于规则的快速决策（默认）
   - **LLM引擎**：使用大语言模型进行智能决策（可选）
+  - 支持OpenAI、DeepSeek、本地Qwen等多种模型
+- **LangGraph集成**：可选的状态图管理，提供更清晰的状态流转（可选）
 - 自然语言沟通生成，生成有策略目的的发言
 - 支持流局保护机制，避免因过度拒绝导致坏人直接获胜
 
 ## LLM配置
 
-系统支持使用OpenAI API进行智能决策。LLM会分析游戏状态、信念系统和历史信息，做出更智能的决策。
+系统支持使用多种LLM进行智能决策：
+- **OpenAI API**: GPT系列模型
+- **DeepSeek API**: DeepSeek模型
+- **本地Qwen模型**: 通过OpenAI兼容API使用本地部署的Qwen模型
+
+LLM会分析游戏状态、信念系统和历史信息，做出更智能的决策。
 
 ### 配置步骤
 
@@ -101,7 +111,28 @@ LLM_MODEL=deepseek-chat
 python -m src.main
 ```
 
-**注意**: DeepSeek API与OpenAI API兼容，如果同时设置了`DEEPSEEK_API_KEY`和`LLM_API_PROVIDER=deepseek`，系统会优先使用DeepSeek。
+#### 使用本地Qwen模型
+
+1. 确保本地已部署Qwen模型（支持OpenAI兼容API），例如使用vLLM或类似框架
+
+2. 创建 `.env` 文件：
+```bash
+USE_LLM=true
+LLM_API_PROVIDER=qwen
+QWEN_BASE_URL=http://localhost:8000/v1
+QWEN_MODEL=qwen
+QWEN_API_KEY=not-needed  # 本地部署通常不需要真实key
+```
+
+3. 运行游戏：
+```bash
+python -m src.main
+```
+
+**注意**: 
+- DeepSeek API与OpenAI API兼容
+- Qwen需要本地部署并支持OpenAI兼容API（如vLLM）
+- 默认Qwen地址为 `http://localhost:8000/v1`，可通过 `QWEN_BASE_URL` 修改
 
 ### LLM功能
 
