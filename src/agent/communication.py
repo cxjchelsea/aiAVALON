@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from game.rules import Team, GamePhase
 from game.roles import RoleType
 from agent.belief_system import BeliefSystem
-from agent.strategy import Personality, StrategyEngine
+from agent.strategy import Personality
 
 
 class SpeechPurpose(Enum):
@@ -47,14 +47,14 @@ class CommunicationGenerator:
         self.personality = personality
     
     def generate_speech(self, context: SpeechContext, belief_system: BeliefSystem,
-                       strategy_engine: StrategyEngine, my_player_id: int,
+                       my_player_id: int,
                        purpose: Optional[SpeechPurpose] = None) -> str:
         """
-        生成发言内容
+        生成发言内容（已废弃，现在由LLM生成发言）
         """
         if purpose is None:
             # 根据局势自动决定发言目的
-            purpose = self._determine_purpose(context, belief_system, strategy_engine, my_player_id)
+            purpose = self._determine_purpose(context, belief_system, my_player_id)
         
         # 根据目的生成发言
         if purpose == SpeechPurpose.GUIDE:
@@ -73,8 +73,8 @@ class CommunicationGenerator:
             return self._generate_neutral_speech(context, belief_system, my_player_id)
     
     def _determine_purpose(self, context: SpeechContext, belief_system: BeliefSystem,
-                          strategy_engine: StrategyEngine, my_player_id: int) -> SpeechPurpose:
-        """根据局势决定发言目的"""
+                          my_player_id: int) -> SpeechPurpose:
+        """根据局势决定发言目的（已废弃，现在由LLM决定）"""
         if self.my_team == Team.GOOD:
             # 好人策略
             if context.proposed_team and my_player_id not in context.proposed_team:

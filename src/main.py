@@ -369,8 +369,8 @@ def main():
     # 加载环境变量
     load_dotenv()
     
-    # 检查是否使用LLM（可以通过环境变量USE_LLM或直接设置）
-    use_llm = os.getenv("USE_LLM", "false").lower() == "true"
+    # 系统现在仅支持LLM策略引擎，必须配置LLM
+    use_llm = True  # 强制使用LLM
     llm_api_provider = os.getenv("LLM_API_PROVIDER", "openai").lower()  # "openai", "deepseek", "qwen"
     use_langgraph = os.getenv("USE_LANGGRAPH", "false").lower() == "true"
     
@@ -386,8 +386,7 @@ def main():
         provider_name = "Qwen (本地)"
         env_var_name = "QWEN_API_KEY"
         base_url = os.getenv("QWEN_BASE_URL", "http://localhost:8000/v1")
-        if use_llm:
-            print(f"使用本地Qwen模型: {base_url}")
+        print(f"使用本地Qwen模型: {base_url}")
     else:
         llm_api_key = os.getenv("OPENAI_API_KEY")
         default_model = "gpt-4o-mini"
@@ -396,9 +395,12 @@ def main():
     
     llm_model = os.getenv("LLM_MODEL", default_model)
     
-    if use_llm and llm_api_provider != "qwen" and not llm_api_key:
-        print(f"警告: 设置了USE_LLM=true但未设置{env_var_name}，将使用普通策略引擎")
-        use_llm = False
+    # 检查LLM配置
+    if llm_api_provider != "qwen" and not llm_api_key:
+        print(f"错误: 系统现在仅支持LLM策略引擎，请设置{env_var_name}环境变量")
+        print(f"示例: export {env_var_name}=your_api_key_here")
+        print("或者在.env文件中设置相应的API密钥")
+        sys.exit(1)
     
     # 创建游戏（5人局）
     player_names = ["Alice", "Bob", "Charlie", "David", "Eve"]
@@ -411,10 +413,7 @@ def main():
         llm_api_provider=llm_api_provider
     )
     
-    if use_llm:
-        print(f"使用{provider_name} LLM策略引擎 (模型: {llm_model})")
-    else:
-        print("使用普通策略引擎")
+    print(f"使用{provider_name} LLM策略引擎 (模型: {llm_model})")
     
     # 选择运行方式
     if use_langgraph:

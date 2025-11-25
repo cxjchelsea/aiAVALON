@@ -17,9 +17,9 @@ aiAVALON/
 │   │   ├── __init__.py
 │   │   ├── base_agent.py     # 智能体基类
 │   │   ├── belief_system.py  # 动态信念系统
-│   │   ├── strategy.py       # 策略决策引擎（规则引擎）
-│   │   ├── llm_strategy.py   # LLM策略引擎
-│   │   └── communication.py # 沟通生成器
+│   │   ├── strategy.py       # 策略相关类型定义（Personality, DecisionContext）
+│   │   ├── llm_strategy.py   # LLM策略引擎（必需）
+│   │   └── communication.py  # 沟通生成器（已废弃，现由LLM生成）
 │   └── main.py               # 主程序入口
 ├── docs/
 │   └── langgraph_integration.md  # LangGraph集成文档
@@ -36,38 +36,31 @@ pip install -r requirements.txt
 
 ## 运行
 
-### 使用普通策略引擎（默认）
+**重要：系统现在仅支持LLM策略引擎，必须配置LLM API才能运行。**
 
-```bash
-python -m src.main
-```
+### 配置LLM API
 
-### 使用LLM策略引擎
-
-1. 创建 `.env` 文件并配置API密钥：
-```bash
-OPENAI_API_KEY=your_api_key_here
-USE_LLM=true
-LLM_MODEL=gpt-4o-mini  # 可选，默认使用gpt-4o-mini
-```
+1. 创建 `.env` 文件并配置API密钥（选择一种方式）：
+   - **OpenAI**: `OPENAI_API_KEY=your_api_key_here`
+   - **DeepSeek**: `DEEPSEEK_API_KEY=your_api_key_here` 并设置 `LLM_API_PROVIDER=deepseek`
+   - **本地Qwen**: 设置 `LLM_API_PROVIDER=qwen` 和 `QWEN_BASE_URL=http://localhost:8000/v1`
 
 2. 运行游戏：
 ```bash
 python -m src.main
 ```
 
-系统会自动检测环境变量，如果设置了 `USE_LLM=true` 且配置了 `OPENAI_API_KEY`，就会使用LLM进行决策。
+系统会自动使用配置的LLM进行所有决策。如果未配置API密钥，程序会提示错误并退出。
 
 ## 功能特性
 
 - 多智能体架构，每个智能体可适应任何角色
 - 动态信念系统，基于贝叶斯推理更新对其他玩家身份的判断
-- 双重策略引擎：
-  - **规则引擎**：基于规则的快速决策（默认）
-  - **LLM引擎**：使用大语言模型进行智能决策（可选）
+- **LLM策略引擎**：使用大语言模型进行智能决策（必需）
   - 支持OpenAI、DeepSeek、本地Qwen等多种模型
+  - 所有决策（队伍提议、投票、任务投票、刺杀、发言）均由LLM完成
 - **LangGraph集成**：可选的状态图管理，提供更清晰的状态流转（可选）
-- 自然语言沟通生成，生成有策略目的的发言
+- 自然语言沟通生成，LLM生成更自然、更有策略性的发言
 - 支持流局保护机制，避免因过度拒绝导致坏人直接获胜
 
 ## LLM配置
@@ -86,9 +79,8 @@ LLM会分析游戏状态、信念系统和历史信息，做出更智能的决�
 1. 创建 `.env` 文件：
 ```bash
 OPENAI_API_KEY=your_openai_api_key_here
-USE_LLM=true
-LLM_API_PROVIDER=openai
-LLM_MODEL=gpt-4o-mini
+LLM_API_PROVIDER=openai  # 可选，默认为openai
+LLM_MODEL=gpt-4o-mini     # 可选，默认使用gpt-4o-mini
 ```
 
 2. 运行游戏：
@@ -101,7 +93,6 @@ python -m src.main
 1. 创建 `.env` 文件：
 ```bash
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
-USE_LLM=true
 LLM_API_PROVIDER=deepseek
 LLM_MODEL=deepseek-chat
 ```
@@ -117,7 +108,6 @@ python -m src.main
 
 2. 创建 `.env` 文件：
 ```bash
-USE_LLM=true
 LLM_API_PROVIDER=qwen
 QWEN_BASE_URL=http://localhost:8000/v1
 QWEN_MODEL=qwen
